@@ -13,6 +13,13 @@ struct DispensePoint {
     double height;        // мм — высота подъёма
 };
 
+struct GCodePointMap {
+    // Все номера строк 0-based (как в QPlainTextEdit::textCursor().blockNumber()).
+    int startLine = -1; // строка комментария "; Point N ..."
+    int xyLine = -1;    // строка "G00 X.. Y.."
+    int endLine = -1;   // последняя строка, относящаяся к точке
+};
+
 class GCodeGenerator {
 public:
     GCodeGenerator();
@@ -29,9 +36,12 @@ public:
 
     // Экспорт G-кода
     QString generateGCode(const QVector<DispensePoint> &points, const QString &comment = "");
+    QString generateGCode(const QVector<DispensePoint> &points, QVector<GCodePointMap>* pointMap, const QString &comment = "");
 
     // Получить boundingRect для графического вывода
     QRectF getBoundingRect() const { return m_boundingRect; }
+
+    double computeDispenseTime(double diameter) const;
 
 private:
     double m_feedRate = 3000.0;  // мм/мин

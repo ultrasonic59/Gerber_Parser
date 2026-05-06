@@ -259,20 +259,12 @@ void MainWindow::onGenerateGCode() {
         return;
     }
 
-    // Генерируем G-код
-    QString gcode = m_gcodeGen->generateGCode(points, layer.fileName);
-
     // Показываем окно
     if (!m_gcodeWindow) {
         m_gcodeWindow = new GCodeWindow(this);
     }
 
-    // Извлекаем точки для графики
-    QVector<QPointF> positions;
-    for (const auto& p : points) positions.append(p.position);
-
-    // ПЕРЕДАЁМ ТРИ АРГУМЕНТА
-    m_gcodeWindow->setGCode(gcode, positions, m_gcodeGen->getBoundingRect());
+    m_gcodeWindow->setGCode(points, m_gcodeGen->getBoundingRect(), layer.fileName);
     m_gcodeWindow->show();
     m_gcodeWindow->raise();
 }
