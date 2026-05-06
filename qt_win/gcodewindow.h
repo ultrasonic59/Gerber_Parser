@@ -11,6 +11,8 @@
 #include <QVector>
 #include <QPointF>
 #include <QWidget>
+#include <QAction>
+#include <QMenu>
 #include "gerbertypes.h"
 
 class GCodeView : public QWidget {
@@ -18,10 +20,13 @@ class GCodeView : public QWidget {
 public:
     explicit GCodeView(QWidget* parent = nullptr);
     void setPoints(const QVector<QPointF>& points, const QRectF& bounds);
+    const QVector<QPointF>& points() const { return m_points; }
     void resetView();
+    void deleteSelectedPoint();
+    void moveSelectedPoint(const QPointF& newPos);
 
 signals:
-    void selectionChanged(QVector<int> selectedIndices);
+    void pointsChanged();
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -29,6 +34,8 @@ protected:
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
+    void contextMenuEvent(QContextMenuEvent* event) override;
+    void keyPressEvent(QKeyEvent* event) override;
 
 private:
     QVector<QPointF> m_points;
@@ -37,12 +44,14 @@ private:
     double m_offsetX = 0.0;
     double m_offsetY = 0.0;
     bool m_dragging = false;
+    bool m_draggingPoint = false;
+    int m_draggedPointIndex = -1;
+    int m_selectedPointIndex = -1;
     QPoint m_lastMousePos;
-    QVector<int> m_selectedIndices;
 
     QPointF worldToScreen(const QPointF& world) const;
     QPointF screenToWorld(const QPointF& screen) const;
-    int findNearestPoint(const QPointF& worldPos, double maxDistPixels) const;
+    int findNearestPoint(const QPointF& screenPos, double maxDist = 10.0) const;
 };
 
 class GCodeWindow : public QMainWindow {
@@ -50,6 +59,7 @@ class GCodeWindow : public QMainWindow {
 public:
     explicit GCodeWindow(QWidget* parent = nullptr);
     void setGCode(const QString& gcode, const QVector<QPointF>& points, const QRectF& bounds);
+    QString regenerateGCode(const QVector<QPointF>& points);
 
 private:
     QTextEdit* m_textEdit;
@@ -57,8 +67,10 @@ private:
     QPushButton* m_copyBtn;
     QPushButton* m_saveBtn;
     QPushButton* m_resetViewBtn;
+    QPushButton* m_deletePointBtn;
     QLabel* m_infoLabel;
     QSplitter* m_splitter;
+    QString m_originalComment;
 };
 
 #endif // GCODEWINDOW_H

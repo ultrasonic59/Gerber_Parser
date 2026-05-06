@@ -8,20 +8,26 @@
 #include <QMessageBox>
 #include <QFile>
 #include <QTextStream>
+#include <QContextMenuEvent>
+#include <QMenu>
+#include <QAction>
+#include <QKeyEvent>
 #include <cmath>
-#include <QScrollBar>
+#include <QFileInfo>
 
 // ==================== GCodeView ====================
 
 GCodeView::GCodeView(QWidget* parent) : QWidget(parent) {
     setMinimumSize(300, 250);
     setMouseTracking(true);
+    setFocusPolicy(Qt::StrongFocus);
 }
 
 void GCodeView::setPoints(const QVector<QPointF>& points, const QRectF& bounds) {
     m_points = points;
     m_bounds = bounds;
-    m_selectedIndices.clear();
+    m_selectedPointIndex = -1;
+    m_draggedPointIndex = -1;
     resetView();
 }
 
@@ -30,6 +36,23 @@ void GCodeView::resetView() {
     m_offsetX = 0.0;
     m_offsetY = 0.0;
     update();
+}
+
+void GCodeView::deleteSelectedPoint() {
+    if (m_selectedPointIndex >= 0 && m_selectedPointIndex < m_points.size()) {
+        m_points.removeAt(m_selectedPointIndex);
+        m_selectedPointIndex = -1;
+        emit pointsChanged();
+        update();
+    }
+}
+
+void GCodeView::moveSelectedPoint(const QPointF& newPos) {
+    if (m_selectedPointIndex >= 0 && m_selectedPointIndex < m_points.size()) {
+        m_points[m_selectedPointIndex] = newPos;
+        emit pointsChanged();
+        update();
+    }
 }
 
 QPointF GCodeView::worldToScreen(const QPointF& world) const {
@@ -50,16 +73,12 @@ QPointF GCodeView::screenToWorld(const QPointF& screen) const {
     return QPointF((screen.x() - ox) / scale, (screen.y() - oy) / scale);
 }
 
-int GCodeView::findNearestPoint(const QPointF& worldPos, double maxDist) const {
+int GCodeView::findNearestPoint(const QPointF& screenPos, double maxDist) const {
     int nearest = -1;
     double minDist = maxDist;
-
     for (int i = 0; i < m_points.size(); ++i) {
         QPointF sp = worldToScreen(m_points[i]);
-        QPointF wp = worldToScreen(worldPos);
-        double dx = sp.x() - wp.x();
-        double dy = sp.y() - wp.y();
-        double dist = sqrt(dx * dx + dy * dy);
+        double dist = sqrt(pow(sp.x() - screenPos.x(), 2) + pow(sp.y() - screenPos.y(), 2));
         if (dist < minDist) {
             minDist = dist;
             nearest = i;
@@ -84,38 +103,28 @@ void GCodeView::wheelEvent(QWheelEvent* event) {
 }
 
 void GCodeView::mousePressEvent(QMouseEvent* event) {
+    setFocus();
+
     if (event->button() == Qt::LeftButton) {
-        QPointF worldPos = screenToWorld(QPointF(event->pos().x(), event->pos().y()));
-
-        // Ищем ближайшую точку (в пикселях экрана)
-        int nearest = findNearestPoint(worldPos, 15.0);
-
-        if (nearest >= 0) {
-            // Ctrl+Click — добавляем/убираем точку
-            if (event->modifiers() & Qt::ControlModifier) {
-                if (m_selectedIndices.contains(nearest)) {
-                    m_selectedIndices.removeAll(nearest);
-                }
-                else {
-                    m_selectedIndices.append(nearest);
-                }
-                update();
-                emit selectionChanged(m_selectedIndices);
-                return;
-            }
-            // Обычный клик — выбираем только одну точку
-            m_selectedIndices.clear();
-            m_selectedIndices.append(nearest);
+        // Проверяем, кликнули ли на точку
+        int idx = findNearestPoint(QPointF(event->pos().x(), event->pos().y()));
+        if (idx >= 0) {
+            // Начинаем перетаскивание точки
+            m_selectedPointIndex = idx;
+            m_draggingPoint = true;
+            m_draggedPointIndex = idx;
+            m_lastMousePos = event->pos();
+            setCursor(Qt::ClosedHandCursor);
             update();
-            emit selectionChanged(m_selectedIndices);
-            return;
         }
-
-        // Клик мимо точек — начинаем панорамирование
-        if (!(event->modifiers() & Qt::ControlModifier)) {
+        else {
+            // Снимаем выделение
+            m_selectedPointIndex = -1;
+            // Начинаем панорамирование
             m_dragging = true;
             m_lastMousePos = event->pos();
             setCursor(Qt::ClosedHandCursor);
+            update();
         }
     }
     else if (event->button() == Qt::MiddleButton) {
@@ -123,10 +132,26 @@ void GCodeView::mousePressEvent(QMouseEvent* event) {
         m_lastMousePos = event->pos();
         setCursor(Qt::ClosedHandCursor);
     }
+    else if (event->button() == Qt::RightButton) {
+        // Выбираем точку под курсором для контекстного меню
+        int idx = findNearestPoint(QPointF(event->pos().x(), event->pos().y()));
+        if (idx >= 0) {
+            m_selectedPointIndex = idx;
+            update();
+        }
+    }
 }
 
 void GCodeView::mouseMoveEvent(QMouseEvent* event) {
-    if (m_dragging) {
+    QPointF world = screenToWorld(QPointF(event->pos().x(), event->pos().y()));
+
+    if (m_draggingPoint && m_draggedPointIndex >= 0) {
+        // Перемещаем точку
+        m_points[m_draggedPointIndex] = world;
+        update();
+    }
+    else if (m_dragging) {
+        // Панорамирование
         QPoint delta = event->pos() - m_lastMousePos;
         m_offsetX += delta.x();
         m_offsetY += delta.y();
@@ -134,29 +159,81 @@ void GCodeView::mouseMoveEvent(QMouseEvent* event) {
         update();
     }
     else {
-        QPointF world = screenToWorld(QPointF(event->pos().x(), event->pos().y()));
-        // Ищем точку под курсором
-        int hovered = findNearestPoint(world, 12.0);
-        if (hovered >= 0) {
-            setToolTip(QString("Point %1\nX: %2 mm\nY: %3 mm\nCtrl+Click to add/remove")
-                .arg(hovered + 1)
-                .arg(m_points[hovered].x(), 0, 'f', 3)
-                .arg(m_points[hovered].y(), 0, 'f', 3));
+        // Подсветка точки под курсором
+        int idx = findNearestPoint(QPointF(event->pos().x(), event->pos().y()));
+        if (idx >= 0) {
             setCursor(Qt::PointingHandCursor);
+            setToolTip(QString("Point %1\nX: %2 mm\nY: %3 mm\nClick to select, drag to move")
+                .arg(idx + 1)
+                .arg(m_points[idx].x(), 0, 'f', 3)
+                .arg(m_points[idx].y(), 0, 'f', 3));
         }
         else {
-            setToolTip(QString("X: %1 mm\nY: %2 mm")
+            setCursor(Qt::ArrowCursor);
+            setToolTip(QString("X: %1 mm\nY: %2 mm\nScroll to zoom, drag to pan")
                 .arg(world.x(), 0, 'f', 3)
                 .arg(world.y(), 0, 'f', 3));
-            setCursor(Qt::ArrowCursor);
         }
     }
 }
 
 void GCodeView::mouseReleaseEvent(QMouseEvent* event) {
-    if (event->button() == Qt::LeftButton || event->button() == Qt::MiddleButton) {
+    if (event->button() == Qt::LeftButton) {
+        if (m_draggingPoint && m_draggedPointIndex >= 0) {
+            // Закончили перемещение точки
+            emit pointsChanged();
+        }
+        m_dragging = false;
+        m_draggingPoint = false;
+        m_draggedPointIndex = -1;
+        setCursor(Qt::ArrowCursor);
+    }
+    else if (event->button() == Qt::MiddleButton) {
         m_dragging = false;
         setCursor(Qt::ArrowCursor);
+    }
+}
+
+void GCodeView::contextMenuEvent(QContextMenuEvent* event) {
+    QMenu menu(this);
+
+    if (m_selectedPointIndex >= 0) {
+        QAction* deleteAction = menu.addAction(QIcon(), "🗑 Delete Point");
+        connect(deleteAction, &QAction::triggered, this, [this]() {
+            deleteSelectedPoint();
+            });
+
+        QAction* moveToOrigin = menu.addAction(QIcon(), "📍 Move to (0,0)");
+        connect(moveToOrigin, &QAction::triggered, this, [this]() {
+            moveSelectedPoint(QPointF(0, 0));
+            });
+
+        menu.addSeparator();
+    }
+
+    QAction* selectAllAction = menu.addAction(QIcon(), "🔵 Deselect All");
+    connect(selectAllAction, &QAction::triggered, this, [this]() {
+        m_selectedPointIndex = -1;
+        update();
+        });
+
+    menu.addSeparator();
+
+    QAction* resetAction = menu.addAction(QIcon(), "🔄 Reset View");
+    connect(resetAction, &QAction::triggered, this, [this]() {
+        resetView();
+        });
+
+    menu.exec(event->globalPos());
+}
+
+void GCodeView::keyPressEvent(QKeyEvent* event) {
+    if (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) {
+        deleteSelectedPoint();
+    }
+    else if (event->key() == Qt::Key_Escape) {
+        m_selectedPointIndex = -1;
+        update();
     }
 }
 
@@ -196,7 +273,7 @@ void GCodeView::paintEvent(QPaintEvent* event) {
         painter.drawLine(p1, p2);
     }
 
-    // Маршрут (все точки — серый пунктир)
+    // Маршрут
     painter.setPen(QPen(QColor(0, 180, 100, 80), 1.0, Qt::DashLine));
     for (int i = 0; i < m_points.size() - 1; ++i) {
         painter.drawLine(worldToScreen(m_points[i]), worldToScreen(m_points[i + 1]));
@@ -207,30 +284,24 @@ void GCodeView::paintEvent(QPaintEvent* event) {
     if (pointScale < 1.5) pointScale = 1.5;
 
     for (int i = 0; i < m_points.size(); ++i) {
-        const QPointF& pt = m_points[i];
-        QPointF sp = worldToScreen(pt);
-
+        QPointF sp = worldToScreen(m_points[i]);
         if (sp.x() < -10 || sp.x() > width() + 10 ||
-            sp.y() < -10 || sp.y() > height() + 10) continue;
+            sp.y() < -10 || sp.y() > height() + 10)
+            continue;
 
-        if (m_selectedIndices.contains(i)) {
-            // ВЫДЕЛЕННАЯ ТОЧКА
-            painter.setBrush(QColor(50, 255, 80));     // Ярко-зелёная заливка
-            painter.setPen(QPen(QColor(200, 255, 200), 2.0));
-            painter.drawEllipse(sp, pointScale + 3, pointScale + 3);
-
-            // Контур
-            painter.setBrush(Qt::NoBrush);
-            painter.setPen(QPen(QColor(255, 255, 255), 1.0, Qt::DotLine));
-            painter.drawEllipse(sp, pointScale + 6, pointScale + 6);
+        if (i == m_selectedPointIndex) {
+            // Выделенная точка — красная
+            painter.setBrush(QColor(255, 80, 80));
+            painter.setPen(QPen(QColor(255, 255, 255), 2.0));
+            painter.drawEllipse(sp, pointScale + 2, pointScale + 2);
 
             // Номер точки
-            painter.setPen(QColor(200, 255, 200));
-            QFont f = painter.font(); f.setPointSize(7); painter.setFont(f);
-            painter.drawText(sp + QPointF(6, -6), QString::number(i + 1));
+            painter.setPen(Qt::white);
+            QFont f = painter.font(); f.setPointSize(8); painter.setFont(f);
+            painter.drawText(sp + QPointF(6, -6), QString("#%1").arg(i + 1));
         }
         else {
-            // ОБЫЧНАЯ ТОЧКА
+            // Обычная точка — жёлтая
             painter.setBrush(QColor(255, 200, 50));
             painter.setPen(QPen(QColor(200, 150, 0), 1.0));
             painter.drawEllipse(sp, pointScale, pointScale);
@@ -241,24 +312,16 @@ void GCodeView::paintEvent(QPaintEvent* event) {
     painter.setPen(QColor(120, 130, 140));
     QFont f = painter.font(); f.setPointSize(9); painter.setFont(f);
 
-    QString selInfo;
-    if (m_selectedIndices.isEmpty()) {
-        selInfo = "Click to select | Ctrl+Click for multi";
-    }
-    else {
-        selInfo = QString("Selected: %1 points").arg(m_selectedIndices.size());
-    }
-
-    painter.drawText(5, height() - 18,
-        QString("Points: %1 | Scale: %2x | Grid: %3 mm")
+    QString info = QString("Points: %1 | Sel: %2 | Scale: %3x | Grid: %4 mm | Bounds: %5×%6 mm")
         .arg(m_points.size())
+        .arg(m_selectedPointIndex >= 0 ? QString::number(m_selectedPointIndex + 1) : "-")
         .arg(m_scale, 0, 'f', 2)
-        .arg(gridStep, 0, 'f', 1));
-    painter.drawText(5, height() - 5, selInfo);
-    painter.drawText(width() - 200, height() - 5,
-        QString("Bounds: %1 x %2 mm")
+        .arg(gridStep, 0, 'f', 1)
         .arg(m_bounds.width(), 0, 'f', 1)
-        .arg(m_bounds.height(), 0, 'f', 1));
+        .arg(m_bounds.height(), 0, 'f', 1);
+
+    painter.drawText(5, height() - 15, info);
+    painter.drawText(5, height() - 4, "🖱 Click=select | Drag=move | Del=delete | RClick=menu | Scroll=zoom");
 }
 
 // ==================== GCodeWindow ====================
@@ -273,14 +336,12 @@ GCodeWindow::GCodeWindow(QWidget* parent) : QMainWindow(parent) {
     QVBoxLayout* mainLayout = new QVBoxLayout(central);
     mainLayout->setContentsMargins(4, 4, 4, 4);
 
-    // Сплиттер: графика слева, код справа
+    // Сплиттер
     m_splitter = new QSplitter(Qt::Horizontal, this);
 
-    // Графический вид (слева)
     m_gcodeView = new GCodeView(this);
     m_splitter->addWidget(m_gcodeView);
 
-    // Текстовое поле (справа)
     m_textEdit = new QTextEdit(this);
     m_textEdit->setReadOnly(true);
     m_textEdit->setFont(QFont("Consolas", 9));
@@ -294,6 +355,14 @@ GCodeWindow::GCodeWindow(QWidget* parent) : QMainWindow(parent) {
 
     mainLayout->addWidget(m_splitter);
 
+    // Сигнал изменения точек
+    connect(m_gcodeView, &GCodeView::pointsChanged, this, [this]() {
+        QVector<QPointF> pts = m_gcodeView->points();
+        QString gcode = regenerateGCode(pts);
+        m_textEdit->setPlainText(gcode);
+        m_infoLabel->setText(QString("📌 Points: %1 (edited)").arg(pts.size()));
+        });
+
     // Панель кнопок
     QHBoxLayout* btnLayout = new QHBoxLayout();
     btnLayout->setContentsMargins(0, 4, 0, 0);
@@ -304,6 +373,13 @@ GCodeWindow::GCodeWindow(QWidget* parent) : QMainWindow(parent) {
 
     btnLayout->addStretch();
 
+    m_deletePointBtn = new QPushButton("🗑 Delete Point", this);
+    m_deletePointBtn->setToolTip("Delete selected point (Del key)");
+    connect(m_deletePointBtn, &QPushButton::clicked, this, [this]() {
+        m_gcodeView->deleteSelectedPoint();
+        });
+    btnLayout->addWidget(m_deletePointBtn);
+
     m_resetViewBtn = new QPushButton("🔄 Reset View", this);
     connect(m_resetViewBtn, &QPushButton::clicked, this, [this]() {
         m_gcodeView->resetView();
@@ -313,7 +389,7 @@ GCodeWindow::GCodeWindow(QWidget* parent) : QMainWindow(parent) {
     m_copyBtn = new QPushButton("📋 Copy G-Code", this);
     connect(m_copyBtn, &QPushButton::clicked, this, [this]() {
         QApplication::clipboard()->setText(m_textEdit->toPlainText());
-        m_infoLabel->setText("✅ Copied!");
+        m_infoLabel->setText("✅ Copied to clipboard!");
         });
     btnLayout->addWidget(m_copyBtn);
 
@@ -328,7 +404,7 @@ GCodeWindow::GCodeWindow(QWidget* parent) : QMainWindow(parent) {
             QTextStream out(&file);
             out << m_textEdit->toPlainText();
             file.close();
-            m_infoLabel->setText("✅ Saved!");
+            m_infoLabel->setText("✅ Saved: " + QFileInfo(path).fileName());
         }
         });
     btnLayout->addWidget(m_saveBtn);
@@ -343,4 +419,40 @@ void GCodeWindow::setGCode(const QString& gcode, const QVector<QPointF>& points,
         .arg(points.size())
         .arg(bounds.width(), 0, 'f', 1)
         .arg(bounds.height(), 0, 'f', 1));
+}
+
+QString GCodeWindow::regenerateGCode(const QVector<QPointF>& points) {
+    QString result;
+    QTextStream out(&result);
+
+    out << "; ===== G-CODE FOR PASTE DISPENSER (EDITED) =====\n";
+    out << "; Generated by GerberParser\n";
+    out << "; Points: " << points.size() << " (manually edited)\n";
+    out << "; \n";
+    out << "G21 ; Units in mm\n";
+    out << "G90 ; Absolute positioning\n";
+    out << "G00 Z5.0 ; Raise Z\n";
+    out << "G00 X0 Y0 ; Go to origin\n";
+    out << "M03 S100 ; Start pump\n";
+    out << "G04 P500 ; Wait for pump\n";
+    out << "\n";
+
+    for (int i = 0; i < points.size(); ++i) {
+        const QPointF& pt = points[i];
+        out << "; Point " << (i + 1) << "\n";
+        out << "G00 Z5.0\n";
+        out << "G00 X" << QString::number(pt.x(), 'f', 3)
+            << " Y" << QString::number(pt.y(), 'f', 3) << "\n";
+        out << "G01 Z0.2 F1500\n";
+        out << "G04 P200\n";
+        out << "G00 Z5.0\n";
+    }
+
+    out << "\n";
+    out << "M05 ; Stop pump\n";
+    out << "G00 X0 Y0 ; Return to origin\n";
+    out << "G00 Z5.0\n";
+    out << "M02 ; End of program\n";
+
+    return result;
 }
