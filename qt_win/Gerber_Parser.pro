@@ -7,10 +7,17 @@ SOURCES += \
     main.cpp \
     mainwindow.cpp \
     Gerber_Parser.cpp \
-    gerberview.cpp
+    gerberview.cpp \
+    gerbertexteditor.cpp \
+    gerbertypes.cpp \
+    gerbersourcemap.cpp \
+    gerberwriter.cpp
 
 HEADERS += \
     mainwindow.h \
     Gerber_Parser.h \
     gerbertypes.h \
-    gerberview.h
+    gerberview.h \
+    gerbertexteditor.h \
+    gerberwriter.h \
+    gerbersourcemap.h

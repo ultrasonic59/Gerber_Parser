@@ -34,6 +34,11 @@ struct GerberCommand {
 
 struct GerberLayer {
     QString fileName;
+    QString sourcePath;
+    QString sourceText;
+    QPointF coordOffset;
+    int intDigits = 2;
+    int fracDigits = 4;
     QVector<QPolygonF> polygons;
     QVector<GerberSegment> segments;
     QVector<GerberCommand> commands;
@@ -41,6 +46,8 @@ struct GerberLayer {
     GerberUnit units = GerberUnit::Millimeters;
     QString errorMessage;
     bool valid = false;
+
+    void recomputeBounds();
 };
 
 struct GerberParseOptions {

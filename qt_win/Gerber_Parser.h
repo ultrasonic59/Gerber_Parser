@@ -9,6 +9,8 @@ class Gerber_Parser : public QObject {
 public:
     explicit Gerber_Parser(QObject* parent = nullptr);
     GerberLayer parseFile(const QString& filePath, const GerberParseOptions& opts = GerberParseOptions());
+    GerberLayer parseText(const QString& text, const QString& displayName = QString(),
+        const GerberParseOptions& opts = GerberParseOptions());
     QString lastError() const { return m_lastError; }
 
 signals:
@@ -45,6 +47,9 @@ private:
     double gerberNumberToDouble(const QString& numStr, bool isInteger = false);
     QPointF parseCurrentCoordinate(const QString& coordStr);
     void clear();
+    GerberLayer parseContent(const QString& content, const QString& displayName,
+        const GerberParseOptions& opts);
+    void finalizeLayer();
 };
 
 #endif

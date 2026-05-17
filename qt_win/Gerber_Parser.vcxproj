@@ -191,6 +191,10 @@
     <ClCompile Include="gcodegenerator.cpp" />
     <ClCompile Include="gcodewindow.cpp" />
     <ClCompile Include="Gerber_Parser.cpp" />
+    <ClCompile Include="gerbertexteditor.cpp" />
+    <ClCompile Include="gerbertypes.cpp" />
+    <ClCompile Include="gerbersourcemap.cpp" />
+    <ClCompile Include="gerberwriter.cpp" />
     <ClCompile Include="gerberview.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="mainwindow.cpp" />
@@ -199,7 +203,10 @@
     <QtMoc Include="Gerber_Parser.h" />
     <QtMoc Include="gcodewindow.h" />
     <ClInclude Include="gcodegenerator.h" />
+    <ClInclude Include="gerbersourcemap.h" />
+    <ClInclude Include="gerberwriter.h" />
     <ClInclude Include="gerbertypes.h" />
+    <QtMoc Include="gerbertexteditor.h" />
     <QtMoc Include="gerberview.h" />
     <QtMoc Include="mainwindow.h" />
   </ItemGroup>

@@ -45,6 +45,18 @@
     <ClCompile Include="gcodewindow.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="gerbertexteditor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="gerbertypes.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="gerbersourcemap.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="gerberwriter.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <QtMoc Include="Gerber_Parser.h">
@@ -67,5 +79,14 @@
     <ClInclude Include="gcodegenerator.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="gerberwriter.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="gerbersourcemap.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <QtMoc Include="gerbertexteditor.h">
+      <Filter>Header Files</Filter>
+    </QtMoc>
   </ItemGroup>
 </Project>

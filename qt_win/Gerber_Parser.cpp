@@ -43,21 +43,36 @@ GerberLayer Gerber_Parser::parseFile(const QString& filePath, const GerberParseO
     }
 
     QFileInfo fi(filePath);
+    m_layer.sourcePath = fi.absoluteFilePath();
     m_layer.fileName = fi.fileName();
-    QTextStream in(&file);
-    // ====== ТЕСТ ЧТЕНИЯ ======
-    QString firstLine = in.readLine();
-    ///qDebug() << "=== FIRST LINE OF FILE:" << firstLine;
-    in.seek(0);
+    const QString content = QString::fromUtf8(file.readAll());
+    file.close();
 
-    int lineNum = 0, totalLines = 0;
-    QTextStream cnt(&file); cnt.seek(0);
-    while (!cnt.atEnd()) { cnt.readLine(); totalLines++; }
-    file.seek(0); in.seek(0);
+    m_layer = parseContent(content, m_layer.fileName, opts);
+    m_layer.sourcePath = fi.absoluteFilePath();
+    m_layer.sourceText = content;
+    return m_layer;
+}
 
-    while (!in.atEnd()) {
-        QString line = in.readLine().trimmed();
+GerberLayer Gerber_Parser::parseText(const QString& text, const QString& displayName,
+    const GerberParseOptions& opts) {
+    clear();
+    return parseContent(text, displayName.isEmpty() ? QStringLiteral("untitled.gbr") : displayName, opts);
+}
+
+GerberLayer Gerber_Parser::parseContent(const QString& content, const QString& displayName,
+    const GerberParseOptions& opts) {
+    clear();
+    m_layer.fileName = displayName;
+    m_layer.sourceText = content;
+
+    const QStringList lines = content.split(QRegularExpression("[\\r\\n]+"), Qt::SkipEmptyParts);
+    const int totalLines = lines.size();
+    int lineNum = 0;
+
+    for (const QString& rawLine : lines) {
         lineNum++;
+        QString line = rawLine.trimmed();
 
         if (totalLines > 0 && lineNum % 100 == 0)
             emit parseProgress(qMin(lineNum * 100 / totalLines, 99));
@@ -72,51 +87,39 @@ GerberLayer Gerber_Parser::parseFile(const QString& filePath, const GerberParseO
         processLine(line, lineNum);
     }
 
-    file.close();
+    finalizeLayer();
+    emit parseProgress(100);
+    return m_layer;
+}
 
-    // Вычисляем boundingRect
-    for (auto& p : m_layer.polygons)
-        m_layer.boundingRect |= p.boundingRect();
-    for (auto& s : m_layer.segments)
-        m_layer.boundingRect |= QRectF(s.startPoint, s.endPoint);
+void Gerber_Parser::finalizeLayer() {
+    m_layer.recomputeBounds();
 
     m_layer.valid = m_lastError.isEmpty() || !m_layer.polygons.isEmpty() || !m_layer.segments.isEmpty();
-    if (m_layer.valid) m_layer.units = m_state.units;
+    if (m_layer.valid) {
+        m_layer.units = m_state.units;
+        m_layer.intDigits = m_state.intDigits;
+        m_layer.fracDigits = m_state.fracDigits;
+    }
 
-    qDebug() << "Parse result:" << m_layer.fileName
-        << "polygons:" << m_layer.polygons.size()
-        << "segments:" << m_layer.segments.size();
-
-    emit parseProgress(100);
-    // Нормализация координат: делаем их относительными
     if (!m_layer.boundingRect.isEmpty()) {
         QPointF topLeft = m_layer.boundingRect.topLeft();
-        qDebug() << "Normalizing coordinates. Offset:" << topLeft;
-        qDebug() << "Original boundingRect:" << m_layer.boundingRect;
+        m_layer.coordOffset = topLeft;
 
-        // Сдвигаем все полигоны
-        for (auto& poly : m_layer.polygons) {
+        for (auto& poly : m_layer.polygons)
             poly.translate(-topLeft.x(), -topLeft.y());
-        }
 
-        // Сдвигаем все сегменты
         for (auto& seg : m_layer.segments) {
             seg.startPoint -= topLeft;
             seg.endPoint -= topLeft;
             seg.centerPoint -= topLeft;
         }
 
-        // Обновляем boundingRect (теперь будет от 0,0)
         m_layer.boundingRect.translate(-topLeft.x(), -topLeft.y());
-
-        qDebug() << "Normalized boundingRect:" << m_layer.boundingRect;
     }
-    // Небольшой отступ по краям
-    m_layer.boundingRect.adjust(-2, -2, 2, 2);
-    qDebug() << "BoundingRect after normalize:" << m_layer.boundingRect;
-    qDebug() << "Width:" << m_layer.boundingRect.width() << "Height:" << m_layer.boundingRect.height();
 
-    return m_layer;
+    if (!m_layer.boundingRect.isEmpty())
+        m_layer.boundingRect.adjust(-2, -2, 2, 2);
 }
 
 bool Gerber_Parser::processLine(const QString& line, int lineNum)
